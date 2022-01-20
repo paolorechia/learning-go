@@ -58,6 +58,9 @@ func addTodoItem(item TodoItem) (int64, error) {
 		"INSERT INTO TodoItems (title, state) VALUES(?, ?)",
 		item.Title, 0,
 	)
+	if err != nil {
+		return 0, fmt.Errorf("addTodoItem: %v", err)
+	}
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("addTodoItem: %v", err)
@@ -116,23 +119,41 @@ func getItemsHandler(r *http.Request) ([]byte, error) {
 func addItemHandler(r *http.Request) ([]byte, error) {
 	log.SetPrefix("addItemHandler: ")
 	buffer := make([]byte, 1024)
-	_, err := r.Body.Read(buffer)
-	if err == io.EOF {
-		var item TodoItem
-		err := json.Unmarshal(buffer, item)
-		if len(item.Title) == 0 {
-			return nil, HTTPError{Code: 400, Reason: "Missing Title in request body"}
+	for {
+		n, err := r.Body.Read(buffer)
+		log.Printf("%v\n", n)
+		if err == io.EOF {
+			encodedBody := make([]byte, 0)
+			byte_ := buffer[0]
+			i := 0
+			for byte_ != '\x00' {
+				encodedBody = append(encodedBody, byte_)
+				i++
+				byte_ = buffer[i]
+			}
+			log.Printf("%v\n", encodedBody)
+			var item TodoItem
+			err := json.Unmarshal(encodedBody, &item)
+			if err != nil {
+				return nil, err
+			}
+			log.Print(item)
+			if len(item.Title) == 0 {
+				return nil, HTTPError{Code: 400, Reason: "Missing Title in request body"}
+			}
+			itemID, err := addTodoItem(TodoItem{
+				Title: item.Title,
+			})
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("ID of added TodoItem: %v\n", itemID)
+			return json.Marshal(itemID)
 		}
-		itemID, err := addTodoItem(TodoItem{
-			Title: item.Title,
-		})
-		if err != nil {
+		if err != io.EOF {
 			return nil, err
 		}
-		fmt.Printf("ID of added TodoItem: %v\n", itemID)
-		return json.Marshal(itemID)
 	}
-	return nil, err
 }
 
 var db *sql.DB
